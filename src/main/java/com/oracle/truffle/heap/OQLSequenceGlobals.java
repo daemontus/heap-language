@@ -1,17 +1,22 @@
 package com.oracle.truffle.heap;
 
-import com.oracle.truffle.api.CallTarget;
-import com.oracle.truffle.api.CompilerDirectives;
-import com.oracle.truffle.api.TruffleLanguage;
+import com.oracle.truffle.api.*;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.ImportStatic;
 import com.oracle.truffle.api.dsl.Specialization;
+import com.oracle.truffle.api.frame.FrameSlot;
+import com.oracle.truffle.api.frame.FrameSlotKind;
+import com.oracle.truffle.api.frame.FrameSlotTypeException;
+import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.interop.*;
 import com.oracle.truffle.api.library.CachedLibrary;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
+import com.oracle.truffle.api.nodes.*;
 import com.oracle.truffle.api.source.Source;
 import com.oracle.truffle.heap.interop.*;
+import com.oracle.truffle.heap.interop.nodes.ArgCallback;
+import com.oracle.truffle.heap.interop.nodes.UnwrapBoolean;
 
 import java.util.Comparator;
 import java.util.Iterator;
@@ -162,23 +167,96 @@ interface OQLSequenceGlobals {
             return true;
         }
 
+        static DirectCallNode makeExecute() {
+            TruffleRuntime runtime = Truffle.getRuntime();
+            return runtime.createDirectCallNode(runtime.createCallTarget(new ExecuteNode()));
+        }
+
         @ExportMessage
-        static Object execute(@SuppressWarnings("unused") Count receiver, Object[] arguments)
-                throws ArityException, UnsupportedTypeException, UnsupportedMessageException
-        {
+        static Object execute(@SuppressWarnings("unused") Count receiver, Object[] arguments,
+                              @Cached(value = "makeExecute()", allowUncached = true) DirectCallNode node,
+                              @Cached ArgCallback callbackArg,
+                              @CachedLibrary(limit = "3") IterableLibrary iterable
+        ) throws ArityException, UnsupportedTypeException, UnsupportedMessageException {
             Args.checkArityBetween(arguments, 1, 2);
-            if (arguments.length == 1) return Length.execute(null, arguments);
-            Iterator<? extends IndexPair<?, ?>> it = Args.unwrapIndexedIterator(arguments, 0);
-            TruffleObject callback = HeapLanguage.unwrapCallbackArgument(arguments, 1, "it", "index", "array");
-            long count = 0;
-            InteropLibrary interop = InteropLibrary.getFactory().getUncached();
-            while (it.hasNext()) {
-                IndexPair<?, ?> element = it.next();
-                if (Types.asBoolean(interop.execute(callback, element.getValue(), element.getIndex(), arguments[0]))) {
-                    count += 1;
+            if (arguments.length == 1) {
+                return Length.execute(null, arguments); // TODO!
+            }
+            //Iterator<? extends IndexPair<?, ?>> it = Args.unwrapIndexedIterator(arguments, 0);
+            //Iterator<?> it = (Iterator<?>) arguments[0];
+            assert iterable.isIterable(arguments[0]);
+            Object it = iterable.getIterator(arguments[0]);
+            return node.call(it, callbackArg.execute(arguments, 1, new String[] { "it", "index" }));   // TODO: Add array callback argument
+        }
+
+        // Arguments [Iterator, Callback]
+        static final class ExecuteNode extends RootNode {
+
+            @Child @SuppressWarnings("FieldMayBeFinal")
+            private LoopNode loop;
+
+            private final FrameSlot countSlot;
+            private final FrameSlot indexSlot;
+
+            protected ExecuteNode() {
+                super(HeapLanguage.getInstance());
+                countSlot = getFrameDescriptor().addFrameSlot("count", FrameSlotKind.Int);
+                indexSlot = getFrameDescriptor().addFrameSlot("index", FrameSlotKind.Int);
+                loop = Truffle.getRuntime().createLoopNode(new LoopIterator(countSlot, indexSlot));
+            }
+
+            @Override
+            public Object execute(VirtualFrame frame) {
+                try {
+                    frame.setInt(countSlot, 0);
+                    frame.setInt(indexSlot, 0);
+                    loop.execute(frame);
+                    return frame.getInt(countSlot);
+                } catch (FrameSlotTypeException e) {
+                    return Errors.rethrow(RuntimeException.class, e);
                 }
             }
-            return count;
+
+            private static final class LoopIterator extends Node implements RepeatingNode {
+
+                @Child @SuppressWarnings("FieldMayBeFinal")
+                private InteropLibrary interop = InteropLibrary.getFactory().createDispatched(3);
+
+                @Child @SuppressWarnings("FieldMayBeFinal")
+                private IteratorLibrary iterator = IteratorLibrary.getFactory().createDispatched(3);
+
+                @Child @SuppressWarnings("FieldMayBeFinal")
+                private UnwrapBoolean bool = UnwrapBoolean.create();
+
+                private final FrameSlot countSlot;
+                private final FrameSlot indexSlot;
+
+                private LoopIterator(FrameSlot countSlot, FrameSlot indexSlot) {
+                    this.countSlot = countSlot;
+                    this.indexSlot = indexSlot;
+                }
+
+                @Override
+                public boolean executeRepeating(VirtualFrame frame) {
+                    try {
+                        Object[] args = frame.getArguments();
+                        Object it = args[0];
+                        int currentIndex = frame.getInt(indexSlot);
+                        frame.setInt(indexSlot, currentIndex + 1);
+                        TruffleObject callback = (TruffleObject) args[1];
+                        Object item = iterator.next(it);
+                        Boolean countItem = item == null ? null : bool.execute(interop.execute(callback, item, currentIndex));
+                        if (countItem == Boolean.TRUE) {
+                            frame.setInt(countSlot, frame.getInt(countSlot) + 1);
+                        }
+                        return item != null;
+                    } catch (UnsupportedTypeException | UnsupportedMessageException | ArityException | FrameSlotTypeException e) {
+                        return Errors.rethrow(RuntimeException.class, e);
+                    }
+                }
+
+            }
+
         }
 
     }

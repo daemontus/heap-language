@@ -132,7 +132,7 @@ final class ObjectHeap implements TruffleObject {
 
         final Iterator<Instance> instances = HeapUtils.getInstances(this.heap, javaClass, includeSubtypes);
         if (filter == null) {
-            return Iterators.exportIterator(new IteratorObjectInstance(instances));
+            return new ObjectsIterable(this.heap);//Iterators.exportIterator(new IteratorObjectInstance(instances));
         } else {
             final TruffleObject finalFilter = filter;
             InteropLibrary interop = InteropLibrary.getFactory().getUncached();
@@ -149,6 +149,55 @@ final class ObjectHeap implements TruffleObject {
                 }
             });
         }
+    }
+
+    @ExportLibrary(IterableLibrary.class)
+    public static class ObjectsIterable implements TruffleObject {
+
+        private final Heap heap;
+
+        public ObjectsIterable(Heap heap) {
+            this.heap = heap;
+        }
+
+        @ExportMessage
+        public static boolean isIterable(ObjectsIterable receiver) {
+            return true;
+        }
+
+        @ExportMessage
+        public static Object getIterator(ObjectsIterable receiver) {
+            return new ObjectsIterator(allInstances(receiver.heap));
+        }
+
+        @CompilerDirectives.TruffleBoundary
+        private static Iterator<Instance> allInstances(Heap heap) {
+            //noinspection unchecked
+            return heap.getAllInstancesIterator();
+        }
+
+    }
+
+    @ExportLibrary(IteratorLibrary.class)
+    public static class ObjectsIterator {
+
+        private final Iterator<Instance> iterator;
+
+        public ObjectsIterator(Iterator<Instance> iterator) {
+            this.iterator = iterator;
+        }
+
+        @ExportMessage
+        public static Object next(ObjectsIterator receiver) {
+            Instance instance = readNext(receiver.iterator);
+            return instance == null ? null : ObjectInstance.create(instance);
+        }
+
+        @CompilerDirectives.TruffleBoundary
+        private static Instance readNext(Iterator<Instance> iterator) {
+            return iterator.hasNext() ? iterator.next() : null;
+        }
+
     }
 
     private Object invoke_finalizables(Object[] arguments) throws ArityException {
@@ -258,7 +307,7 @@ final class ObjectHeap implements TruffleObject {
 
         protected ForEachObject() {
             super(HeapLanguage.getInstance());
-            iteratorSlot = getFrameDescriptor().addFrameSlot("iterator", null, FrameSlotKind.Object);
+            iteratorSlot = getFrameDescriptor().addFrameSlot("iterator", FrameSlotKind.Object);
             loop = Truffle.getRuntime().createLoopNode(new Loop(iteratorSlot));
         }
 
@@ -349,6 +398,7 @@ final class ObjectHeap implements TruffleObject {
         ) throws UnsupportedTypeException, ArityException {
             Args.checkArityBetween(arguments, 1, 3);
             TruffleObject callback = callbackArg.execute(arguments, 0, new String[]{ "it" });
+            assert callback != null;    // ensured by requiring one argument
             JavaClass clazz = classArg.execute(arguments, 1, receiver.heap);
             Boolean includeSubclasses = subclassArg.execute(arguments, 2, true);
             node.call(callback, receiver.heap, clazz, includeSubclasses);

@@ -7,7 +7,6 @@ import com.oracle.truffle.api.interop.UnknownIdentifierException;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
 
-import java.util.ArrayList;
 import java.util.Iterator;
 
 /**
@@ -26,11 +25,10 @@ public final class InteropIterator<T> implements TruffleObject, Iterator<T> {
     private static final MemberDescriptor MEMBERS = MemberDescriptor.functions(HAS_NEXT, NEXT);
 
     private final Iterator<T> iterator;
-    private final ArrayList<Object> valueCache;
+    private int nextIndex = 0;
 
     public InteropIterator(Iterator<T> iterator) {
         this.iterator = iterator;
-        this.valueCache = new ArrayList<>();
     }
 
     @Override
@@ -40,9 +38,9 @@ public final class InteropIterator<T> implements TruffleObject, Iterator<T> {
 
     @Override
     public T next() {
-        T val = this.iterator.next();
-        valueCache.add(val);
-        return val;
+        T item = this.iterator.next();
+        nextIndex += 1; // do not increment if next() throws
+        return item;
     }
 
     @ExportMessage
@@ -52,18 +50,12 @@ public final class InteropIterator<T> implements TruffleObject, Iterator<T> {
 
     @ExportMessage
     public static long getArraySize(InteropIterator<?> receiver) {
-        // Here, we sadly have to iterate the whole array at the moment...
-        // TODO: With latest JS and python, we should be able to just extend the array by one.
-        while (receiver.hasNext()) { receiver.next(); }
-        return receiver.valueCache.size();
+        return receiver.iterator.hasNext() ? receiver.nextIndex + 1 : receiver.nextIndex;
     }
 
     @ExportMessage
     public static boolean isArrayElementReadable(InteropIterator<?> receiver, long index) {
-        while (receiver.hasNext() && index >= receiver.valueCache.size()) {
-            receiver.next();
-        }
-        return index < receiver.valueCache.size();
+        return receiver.iterator.hasNext() && index == receiver.nextIndex;
     }
 
     @ExportMessage
@@ -71,7 +63,7 @@ public final class InteropIterator<T> implements TruffleObject, Iterator<T> {
         if (!isArrayElementReadable(receiver, index)) {
             throw new ArrayIndexOutOfBoundsException((int) index);
         }
-        return receiver.valueCache.get((int) index);
+        return receiver.next();
     }
 
     @ExportMessage
