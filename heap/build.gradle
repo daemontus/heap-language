@@ -1,7 +1,14 @@
+import com.oracle.truffle.gradle.NativeImage
+
 plugins {
     id 'java-library'
     id 'jacoco'
     id 'truffle-language'
+    id 'application'
+}
+
+graal {
+    truffleLanguage "heap"
 }
 
 dependencies {
@@ -13,4 +20,38 @@ dependencies {
 
     testImplementation "org.graalvm.js:js:$graalVersion"
     testImplementation "junit:junit:$junitVersion"
+}
+
+application {
+    mainClassName "com.oracle.truffle.heap.ScriptRunner"
+}
+
+jar {
+    manifest {
+        attributes(
+                //'Class-Path': configurations.compile.collect { it.getName() }.join(' '),
+                'Main-Class': 'com.oracle.truffle.heap.ScriptRunner'
+        )
+    }
+}
+
+/*
+Native image spec sheet:
+ - A task prototype that can build a native image from:
+    - a Jar task output
+    - main sources (like JavaExec)
+ - If application plugin is present, also add task to build application
+ */
+
+task makeNative(type: NativeImage) {
+    forJarTask jar
+    outputName "ScriptRunner"
+    cmdArgs '--shared'
+    appendClasspath "$buildDir/libs/heap.jar"
+
+}
+
+task foo(type: JavaExec) {
+    classpath "foo"
+
 }

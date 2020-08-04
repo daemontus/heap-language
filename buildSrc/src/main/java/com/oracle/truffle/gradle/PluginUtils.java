@@ -1,6 +1,9 @@
 package com.oracle.truffle.gradle;
 
+import org.gradle.api.Action;
 import org.gradle.api.JavaVersion;
+import org.gradle.api.Project;
+import org.gradle.api.distribution.DistributionContainer;
 
 import javax.annotation.Nullable;
 import java.io.File;
@@ -23,6 +26,18 @@ class PluginUtils {
         // (JVMCI enabled OpenJDK8). For Graal based on JDK11, java.vendor.version is set. For older JDKs,
         // java.vm.name should contain GraalVM as well.
         return System.getProperty("java.vendor.version", "").contains("GraalVM") || System.getProperty("java.vm.name", "").contains("GraalVM");
+    }
+
+    /**
+     * <p>Returns a path to current JVM home folder.</p>
+     */
+    static String getJavaHome() {
+        return System.getProperty("java.home");
+    }
+
+    static void withDistributions(Project project, Action<DistributionContainer> action) {
+        if (project.getExtensions().findByName("distributions") == null) return;
+        project.getExtensions().configure("distributions", action);
     }
 
     /**

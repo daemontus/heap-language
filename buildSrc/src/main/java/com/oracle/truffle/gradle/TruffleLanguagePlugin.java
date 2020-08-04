@@ -1,15 +1,23 @@
 package com.oracle.truffle.gradle;
 
+import org.gradle.api.JavaVersion;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
+import org.gradle.api.distribution.plugins.DistributionPlugin;
+import org.gradle.api.file.CopySpec;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.plugins.JavaPluginConvention;
 import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.application.CreateStartScripts;
+import org.gradle.api.tasks.bundling.Jar;
 import org.gradle.process.JavaForkOptions;
 
 import javax.annotation.Nonnull;
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.OpenOption;
+import java.nio.file.StandardOpenOption;
 
 /**
  * <p>Truffle language plugin allows the project to be used as a custom truffle language. It automatically
@@ -35,6 +43,7 @@ public class TruffleLanguagePlugin implements Plugin<Project> {
         if (project.getPluginManager().findPlugin("truffle") != null) { // If you are writing a language, no need to apply truffle.
             throw new RuntimeException("Cannot apply both truffle and truffle-language plugins on one project.");
         }
+        GraalExtension config = GraalExtension.initInProject(project);
 
         // Set truffle classpath on all JavaForkOptions tasks.
         project.getTasks().all(task -> {
@@ -74,6 +83,44 @@ public class TruffleLanguagePlugin implements Plugin<Project> {
                     ));
                 });
             }
+        });
+
+        project.afterEvaluate(p -> {
+            if (config.truffleLanguage == null) {
+                throw new IllegalStateException("Please specify truffleLangauge");  // TODO: better message.
+            }
+            Jar graalComponent = project.getTasks().create("graalComponent", Jar.class, task -> {
+                task.setGroup("distribution");
+                task.getArchiveBaseName().set(project.getName() + "-component");
+                task.getDestinationDirectory().set(new File(project.getBuildDir(), "distributions"));
+                File tmpDir = task.getTemporaryDir();
+                File symlinks = new File(tmpDir, "symlinks");
+                try {
+                    Files.write(symlinks.toPath(), "Hello symlinks!".getBytes());
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                task.manifest(manifest -> {
+                    manifest.getAttributes().put("Bundle-Name", "Heap Language");
+                    manifest.getAttributes().put("Bundle-Symbolic-Name", "com.oracle.truffle.heap");
+                    manifest.getAttributes().put("Bundle-Version", config.getGraalVersion());
+                    manifest.getAttributes().put("Bundle-RequireCapability", "org.graalvm; filter:=\"(&(graalvm_version="+config.getGraalVersion()+"))\"");
+                    manifest.getAttributes().put("x-GraalVM-Polyglot-Part", "True");
+                });
+                task.metaInf(c -> {
+                    c.from(symlinks);
+                });
+                JavaPluginConvention javaPlugin = project.getConvention().findPlugin(JavaPluginConvention.class);
+                if (javaPlugin == null) return;
+                SourceSet mainSources = javaPlugin.getSourceSets().findByName("main");
+                if (mainSources == null) return;
+                task.from(mainSources.getCompileClasspath(), copy -> {
+                    copy.into("language/"+config.truffleLanguage+"/lib");
+                });
+                task.from(project.getTasks().findByName("jar").getOutputs(), copy -> {
+                    copy.into("languages/"+config.truffleLanguage);
+                });
+            });
         });
     }
 
