@@ -1,13 +1,13 @@
 plugins {
     id 'java-library'
     id 'jacoco'
-    id 'truffle'
+    id 'org.graalvm.plugin.compiler'
 }
 
 dependencies {
-    truffleLanguage project(":heap")
-    truffleLanguage "org.graalvm.js:js:$graalVersion"
-    truffleLanguage "org.graalvm.js:js-scriptengine:$graalVersion"
+    language project(":heap")
+    installedLanguage "org.graalvm.js:js:$graalVersion"
+    installedLanguage "org.graalvm.js:js-scriptengine:$graalVersion"
 
     // Heap analysis library from Netbeans
     implementation "org.graalvm.sdk:graal-sdk:$graalVersion"

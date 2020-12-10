@@ -1,7 +1,13 @@
 plugins {
     id 'java-library'
     id 'jacoco'
-    id 'truffle-language'
+    id 'org.graalvm.plugin.truffle-language'
+}
+
+graal {
+    version '20.1.0'
+    languageId 'heap'
+    languageName 'heap'
 }
 
 dependencies {

@@ -1,13 +1,13 @@
 plugins {
     id 'java-library'
     id 'com.github.johnrengelman.shadow' version '5.2.0'
-    id 'truffle'
+    id 'org.graalvm.plugin.compiler'
 }
 
 dependencies {
     implementation project(':oql-engine')
-    truffleLanguage project(':heap')
-    truffleLanguage "org.graalvm.js:js:$graalVersion"
+    language project(':heap')
+    installedLanguage "org.graalvm.js:js:$graalVersion"
 
     implementation "org.netbeans.modules:org-netbeans-modules-profiler-oql:$libProfilerVersion"
     implementation 'org.openjdk.jmh:jmh-core:1.21'
